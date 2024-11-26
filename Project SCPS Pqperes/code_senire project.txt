@@ -1,0 +1,566 @@
+#include <Arduino.h>
+#include <Adafruit_MLX90614.h>
+#include <Wire.h>
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <time.h>
+#include <MPU6050_light.h>
+#include <Buzzer.h>
+#include "MAX30105.h"
+
+#include "heartRate.h"
+
+#define button 2
+#define led 15
+int state;
+
+Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+Adafruit_SSD1306 display = Adafruit_SSD1306(128, 64);
+  
+const char* ssid = "Barcelona";
+const char* password =  "11849136";
+
+Buzzer buzzer(23, 13);
+
+// ############################ Heart Variables #############
+MAX30105 particleSensor;
+
+const byte RATE_SIZE = 4; //Increase this for more averaging. 4 is good.
+byte rates[RATE_SIZE]; //Array of heart rates
+byte rateSpot = 0;
+long lastBeat = 0; //Time at which the last beat occurred
+
+float beatsPerMinute;
+int beatAvg;
+int beatMax = 0;
+//----------------------------------------------------------
+
+//#########################  Set Gyro Variables ######################
+MPU6050 mpu(Wire);
+
+ int16_t AcX, AcY, AcZ, Tmp, GyX, GyY, GyZ;
+ float ax = 0, ay = 0, az = 0, gx = 0, gy = 0, gz = 0;
+ boolean fall = false; //stores if a fall has occurred
+ boolean trigger1 = false; //stores if first trigger (lower threshold) has occurred
+ boolean trigger2 = false; //stores if second trigger (upper threshold) has occurred
+ boolean trigger3 = false; //stores if third trigger (orientation change) has occurred
+ byte trigger1count = 0; //stores the counts past since trigger 1 was set true
+ byte trigger2count = 0; //stores the counts past since trigger 2 was set true
+ byte trigger3count = 0; //stores the counts past since trigger 3 was set true
+ int angleChange = 0;
+  long timer = 0;
+
+  long timerHeartBeats;
+  long timerTeamerture;
+
+ int fallRateValue = -10;
+
+ const char* ntpServer = "pool.ntp.org";
+ unsigned long epochTime; 
+//---------------------------------------------------------------------
+
+unsigned long getTime() {
+  time_t now;
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    //Serial.println("Failed to obtain time");
+    return(0);
+  }
+  time(&now);
+  return now;
+}
+char * getTimeLong() {
+ time_t rawtime = getTime();
+    struct tm  ts;
+    char      * buf;
+
+    // Format time, "ddd yyyy-mm-dd hh:mm:ss zzz"
+    ts = *localtime(&rawtime);
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.000000Z", &ts);
+
+    
+
+   return buf;
+}
+
+void submit_fall_rate_to_firestore(char deviceId[6],char buf[80], int fallRateValue){
+
+  // char * buf = getTimeLong();
+
+ char fallRate[2]; 
+  sprintf(fallRate,"%d",fallRateValue);
+//  char *deviceId = "11111";
+
+  Serial.print("FallRateValue: ");  
+  Serial.println(fallRate);  
+  Serial.print("Timestamp: ");  
+  Serial.println(buf);  
+  Serial.print("deviceId: ");  
+  Serial.println(deviceId);  
+
+  char str_header[500];
+  strcpy(str_header,"{\"fields\" : {\"timestampValue\": {\"timestampValue\": \"");
+  strcat(str_header, buf);
+  strcat(str_header, "\"},\"fallingRateValue\": {\"stringValue\": \"");
+  strcat(str_header, fallRate);
+  strcat(str_header, "\"},\"deviceId\": {\"stringValue\": \"");
+  strcat(str_header, deviceId);
+  strcat(str_header, "\"}}}");
+
+//String ddd =  "{\"fields\" : {\"timestampValue\": {\"timestampValue\": \"$timestamp\"},\"fallingRateValue\": {\"stringValue\": \"Humedity is high 90%\"},\"deviceId\": {\"stringValue\": \"11111\"},\"sensorType\": {\"stringValue\": \"humedity\"}}}";
+ Serial.println(str_header);
+
+   //Check WiFi connection status
+  
+   HTTPClient http;   
+  
+   http.begin("Link");  //Specify destination for HTTP request
+   http.addHeader("Content-Type", "application/json");             //Specify content-type header
+  
+   int httpResponseCode = http.POST(str_header);   //Send the actual POST request
+  
+   if(httpResponseCode>0){
+  
+    String response = http.getString();                       //Get the response to the request
+  
+    Serial.println(httpResponseCode);   //Print return code
+    Serial.println(response);           //Print request answer
+  
+   }else{
+  
+    Serial.print("Error on sending POST: ");
+    Serial.println(httpResponseCode);
+  
+   }
+  
+   http.end();  //Free resources
+
+ //  delay(10000);
+}
+
+void submit_HeartBeat_to_firestore(char deviceId[6],char buf[80], float HB){
+
+  // char * buf = getTimeLong();
+
+ //char fallRate[2]; 
+ // sprintf(fallRate,"%d",fallRateValue);
+//  char *deviceId = "11111";
+
+  Serial.print("Heart Beat: ");  
+  Serial.println(HB);  
+  Serial.print("Timestamp: ");  
+  Serial.println(buf);  
+  Serial.print("deviceId: ");  
+  Serial.println(deviceId);  
+
+  char HB_value[30];
+//double num = 11.1111111111111;
+
+sprintf(HB_value, "%2.2f", HB);
+
+  char str_header[500];
+  strcpy(str_header,"{\"fields\" : {\"timestampValue\": {\"timestampValue\": \"");
+  strcat(str_header, buf);
+  strcat(str_header, "\"},\"heartBeat\": {\"stringValue\": \"");
+  strcat(str_header, HB_value);
+  strcat(str_header, "\"},\"deviceId\": {\"stringValue\": \"");
+  strcat(str_header, deviceId);
+  strcat(str_header, "\"}}}");
+
+//String ddd =  "{\"fields\" : {\"timestampValue\": {\"timestampValue\": \"$timestamp\"},\"fallingRateValue\": {\"stringValue\": \"Humedity is high 90%\"},\"deviceId\": {\"stringValue\": \"11111\"},\"sensorType\": {\"stringValue\": \"humedity\"}}}";
+ Serial.println(str_header);
+
+   //Check WiFi connection status
+  
+   HTTPClient http;   
+  
+   http.begin("Link");  //Specify destination for HTTP request
+   http.addHeader("Content-Type", "application/json");             //Specify content-type header
+  
+   int httpResponseCode = http.POST(str_header);   //Send the actual POST request
+  
+   if(httpResponseCode>0){
+  
+    String response = http.getString();                       //Get the response to the request
+  
+    Serial.println(httpResponseCode);   //Print return code
+    Serial.println(response);           //Print request answer
+  
+   }else{
+  
+    Serial.print("Error on sending POST: ");
+    Serial.println(httpResponseCode);
+  
+   }
+  
+   http.end();  //Free resources
+
+ //  delay(10000);
+}
+void submit_Temperature_to_firestore(char deviceId[6],char buf[80], float Temp){
+
+  // char * buf = getTimeLong();
+
+ //char fallRate[2]; 
+ // sprintf(fallRate,"%d",fallRateValue);
+//  char *deviceId = "11111";
+
+  Serial.print("Teamperature: ");  
+  Serial.println(Temp);  
+  Serial.print("Timestamp: ");  
+  Serial.println(buf);  
+  Serial.print("deviceId: ");  
+  Serial.println(deviceId);  
+
+  char HB_value[30];
+//double num = 11.1111111111111;
+
+sprintf(HB_value, "%2.2f", Temp);
+
+  char str_header[500];
+  strcpy(str_header,"{\"fields\" : {\"timestampValue\": {\"timestampValue\": \"");
+  strcat(str_header, buf);
+  strcat(str_header, "\"},\"temperature\": {\"stringValue\": \"");
+  strcat(str_header, HB_value);
+  strcat(str_header, "\"},\"deviceId\": {\"stringValue\": \"");
+  strcat(str_header, deviceId);
+  strcat(str_header, "\"}}}");
+
+//String ddd =  "{\"fields\" : {\"timestampValue\": {\"timestampValue\": \"$timestamp\"},\"fallingRateValue\": {\"stringValue\": \"Humedity is high 90%\"},\"deviceId\": {\"stringValue\": \"11111\"},\"sensorType\": {\"stringValue\": \"humedity\"}}}";
+ Serial.println(str_header);
+
+   //Check WiFi connection status
+  
+   HTTPClient http;   
+  
+   http.begin("Link");  //Specify destination for HTTP request
+   http.addHeader("Content-Type", "application/json");             //Specify content-type header
+  
+   int httpResponseCode = http.POST(str_header);   //Send the actual POST request
+  
+   if(httpResponseCode>0){
+  
+    String response = http.getString();                       //Get the response to the request
+  
+    Serial.println(httpResponseCode);   //Print return code
+    Serial.println(response);           //Print request answer
+  
+   }else{
+  
+    Serial.print("Error on sending POST: ");
+    Serial.println(httpResponseCode);
+  
+   }
+  
+   http.end();  //Free resources
+
+ //  delay(10000);
+}
+
+void fall_detection(){
+ // Star Fall Detection Script  --------------------------------------------------------
+
+   mpu.update();
+ 
+
+  buzzer.begin(10);
+// if(millis() - timer > 100){ // print data every second
+
+   ax = mpu.getAccX() ;
+   ay = mpu.getAccY();
+   az = mpu.getAccZ();
+   gx = mpu.getGyroX();
+   gy = mpu.getGyroX();
+   gz = mpu.getGyroX();
+
+   float Raw_Amp = pow(pow(ax, 2) + pow(ay, 2) + pow(az, 2), 0.5);
+   int Amp = Raw_Amp * 10;
+
+   if (Raw_Amp <= 2 && trigger2 == false) { //if AM breaks lower threshold (0.4g)     
+trigger1 = true;     
+//Serial.println("TRIGGER 1 ACTIVATED");   
+}   
+if (trigger1 == true) {     
+trigger1count++;     
+if (Amp >= 10) { //if AM breaks upper threshold (3g)
+       trigger2 = true;
+       //Serial.println("TRIGGER 2 ACTIVATED");
+       trigger1 = false; trigger1count = 0;
+     }
+   }
+   if (trigger2 == true) {
+     trigger2count++;
+     angleChange = pow(pow(gx, 2) + pow(gy, 2) + pow(gz, 2), 0.5); 
+    // Serial.println(angleChange);
+     if (angleChange >= 30 && angleChange <= 400) { //if orientation changes by between 80-100 degrees       
+trigger3 = true; trigger2 = false; trigger2count = 0;       
+
+}   
+}   
+if (trigger3 == true) {     
+trigger3count++;     
+if (trigger3count >= 10) {
+       angleChange = pow(pow(gx, 2) + pow(gy, 2) + pow(gz, 2), 0.5);
+       //delay(10);
+       Serial.println(angleChange);
+       if ((angleChange >= 0) && (angleChange <= 10)) { //if orientation changes remains between 0-10 degrees         
+fall = true; trigger3 = false; trigger3count = 0;     
+  
+//Serial.println(angleChange);       
+}       
+else { //user regained normal orientation         
+trigger3 = false; trigger3count = 0;         
+//Serial.println("TRIGGER 3 DEACTIVATED");       
+}     
+}   
+}   
+if (fall == true) { //in event of a fall detection     
+Serial.println("FALL DETECTED");     
+//buzzer_fire();
+
+fallRateValue = angleChange;  
+
+ int time = 500;
+  buzzer.sound(NOTE_E4, time / 2);
+  buzzer.sound(NOTE_E4, time / 2);
+  buzzer.sound(NOTE_E4, time);
+  buzzer.sound(NOTE_E4, time / 2);
+  buzzer.sound(NOTE_E4, time / 2);
+  buzzer.sound(NOTE_E4, time);
+  
+  buzzer.end(2000);
+
+fall = false;   
+}   
+if (trigger2count >= 6) { //allow 0.5s for orientation change
+     trigger2 = false; trigger2count = 0;
+  //   Serial.println("TRIGGER 2 DECACTIVATED");
+   }
+   if (trigger1count >= 6) { //allow 0.5s for AM to break upper threshold
+     trigger1 = false; trigger1count = 0;
+  //   Serial.println("TRIGGER 1 DECACTIVATED");
+   }
+
+
+  //   timer = millis();
+  // }
+ //int fallRateValue = get_fallRate();
+// Serial.print("Fall Rate");
+//Serial.println(fallRateValue);
+if((fallRateValue >=0) && (fallRateValue <=15)){
+
+    time_t rawtime = getTime();
+    struct tm  ts;
+    char       buf[80];
+
+    // Format time, "ddd yyyy-mm-dd hh:mm:ss zzz"
+    ts = *localtime(&rawtime);
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.000000Z", &ts);
+
+char deviceId[6] = "11111";
+submit_fall_rate_to_firestore(deviceId,buf,fallRateValue);
+ 
+
+}
+   
+}
+
+
+
+=======================================================
+
+void setup() {
+  Serial.begin(9600);
+
+//################### Setup WiFi ######################
+   delay(4000); 
+  
+  WiFi.begin(ssid, password); 
+  
+  while (WiFi.status() != WL_CONNECTED) { //Check for the connection
+    delay(1000);
+    Serial.println("Connecting to WiFi..");
+  }
+//--------------------------------------------------------
+
+//##################### Heart Rate Sensor Setup ################
+  // Initialize sensor
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST,0x57)) //Use default I2C port, 400kHz speed
+  {
+    Serial.println("MAX30105 was not found. Please check wiring/power. ");
+    while (1);
+  }
+  Serial.println("Place your index finger on the sensor with steady pressure.");
+
+  particleSensor.setup(); //Configure sensor with default settings
+  particleSensor.setPulseAmplitudeRed(0x0A); //Turn Red LED to low to indicate sensor is running
+  particleSensor.setPulseAmplitudeGreen(0); //Turn off Green LED
+//--------------------------------------------------------
+
+//##################### Gyro Sensor Setup ################
+  Wire.begin();
+  
+  byte status = mpu.begin();
+  Serial.print(F("MPU6050 status: "));
+  Serial.println(status);
+  while(status!=0){ } // stop everything if could not connect to MPU6050
+  
+  Serial.println(F("Calculating offsets, do not move MPU6050"));
+  delay(1000);
+  mpu.calcOffsets(true,true); // gyro and accelero
+  Serial.println("Done!\n");
+  
+  Serial.println("Connected to the WiFi network");
+
+  configTime(0, 0, ntpServer);
+//---------------------------------------------------------  
+
+
+//##################### Button and LED Setup ################
+//  
+  pinMode(button,INPUT);
+  pinMode(led,OUTPUT);
+//-----------------------------------------------------------
+
+//##################### Display Setup ################
+  while (!Serial);
+
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C); // Address 0x3C for 128x32
+
+  Serial.println("Adafruit MLX90614 test");
+
+  if (!mlx.begin(0x5A)) {
+    Serial.println("Error connecting to MLX sensor. Check wiring.");
+    while (1);
+  };
+
+  display.display();
+  delay(1000);
+
+  // Clear the buffer.
+  display.clearDisplay();
+  display.display();
+
+   display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+//--------------------------------------------------------------  
+
+timerHeartBeats = millis();
+timerTeamerture = millis();
+
+}
+
+void loop() {
+
+ if(WiFi.status()== WL_CONNECTED){
+
+//##################### Heart Beats ################
+
+
+   long irValue = particleSensor.getIR();
+ //  Serial.print("checkForBeat : ");
+//Serial.println(irValue);
+   if (checkForBeat(irValue) == true)
+   {
+    //We sensed a beat!
+    long delta = millis() - lastBeat;
+    lastBeat = millis();
+
+    beatsPerMinute = 60 / (delta / 1000.0);
+
+    if (beatsPerMinute < 255 && beatsPerMinute > 20)
+    {
+      rates[rateSpot++] = (byte)beatsPerMinute; //Store this reading in the array
+      rateSpot %= RATE_SIZE; //Wrap variable
+
+      //Take average of readings
+      beatAvg = 0;
+      for (byte x = 0 ; x < RATE_SIZE ; x++)
+        beatAvg += rates[x];
+      beatAvg /= RATE_SIZE;
+      if(beatMax < beatAvg){
+          beatMax = beatAvg;
+      }
+      
+    }
+
+
+    time_t rawtime = getTime();
+    struct tm  ts;
+    char       buf[80];
+
+    // Format time, "ddd yyyy-mm-dd hh:mm:ss zzz"
+    ts = *localtime(&rawtime);
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.000000Z", &ts);
+
+char deviceId[6] = "11111";
+
+if(millis() > timerHeartBeats + 60000 ){
+  timerHeartBeats = millis();
+  
+  submit_HeartBeat_to_firestore(deviceId,buf,beatMax);
+  beatMax = 0;
+}
+
+  }
+//--------------------------------------------------------------  
+
+//##################### Gyro  ################
+ fall_detection();
+
+fallRateValue = -10;
+//--------------------------------------------------------------  
+
+//##################### Button and LED ################
+  state = digitalRead(button);
+  if(state == HIGH){
+    Serial.println("Button Pressed");
+    digitalWrite(led, HIGH);
+  }else{
+    digitalWrite(led, LOW);
+  }
+//------------------------------------------------------
+
+//##################### Temperature ################
+// Serial.print("Temperature = "); Serial.print(mlx.readObjectTempC()); Serial.println("*C");
+//  Serial.println();
+
+display.clearDisplay();
+  display.setCursor(0,0);
+  display.print("Temperature = ");
+  display.println(mlx.readObjectTempC());
+   display.print("\nHeart Rate = ");
+  display.println(beatsPerMinute);
+  display.print("\nSCPS Project");
+  display.setCursor(0,0);
+  display.display(); 
+
+      time_t rawtime = getTime();
+    struct tm  ts;
+    char       buf[80];
+
+    // Format time, "ddd yyyy-mm-dd hh:mm:ss zzz"
+    ts = *localtime(&rawtime);
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.000000Z", &ts);
+
+char deviceId[6] = "11111";
+
+if(millis() > timerTeamerture + 60000 ){
+  timerTeamerture = millis();
+  
+  submit_Temperature_to_firestore(deviceId,buf,mlx.readObjectTempC());
+}
+//-----------------------------------------------------
+
+ 
+  }else{
+  
+    Serial.println("Error in WiFi connection");   
+  
+ }
+// delay(100);
+}
+

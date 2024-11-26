@@ -1,0 +1,105 @@
+\leq <= , \geq >= , neq =! , \leftarrow <-- , = = , 
+
+Algorithm 1 Body temperature detection
+	Requiered: IR Teampresure Sensor
+	Ensure: high-temperature warning
+	Initialization:
+	Set threshold for body temperature Tth = 37
+	Get temperature value Tbody from IR temperature sensor
+	if(Tbody > Tth )
+		Turn LED ON
+		Buzzer sound
+		Send alarm message to the parent app
+		Add event to the database
+	End if
+---------------------------------------------
+
+Algorithm 2 Fall detection
+Require: 3 Axis Analog Gyro and Accelerometer 
+Ensure: hard falling warning
+	Initialization:
+	Set threshold for detecting falling between 0 and 10 Fth
+	Get acceleration and gyroscope values from the sensor and apply the formula to detect hard-falling F
+	if(Tthmin < F < Tthmax )
+		Turn LED ON
+		Buzzer sound
+		Send alarm message to the parent app
+		Add event to the database
+	End if
+---------------------------------------------
+Algorithm 3 GPS location detection
+Require: GPS Module
+Ensure: Exit area detection
+	Initialization:
+	Set threshold for detecting distance from parent Dth= 20m
+	Get location latitude and longitude values every minute D
+	if(D > Dth)
+		Turn LED ON
+		Buzzer sound
+		Send alarm message to the parent app
+		Add event to the database
+	End if
+---------------------------------------------
+\begin{algorithm}
+\caption{Body temperature detection}\label{alg:cap}
+\begin{algorithmic}
+\REQUIRE {IR Temperature Sensor}
+\ENSURE {high-temperature warning}
+\STATE {\textit{Initialization:}} 
+\STATE {Set threshold for body temperature \textit{T\textsubscript{th}} = 37}
+\STATE {Get temperature value \textit{T \textsubscript{body}} from IR temperature sensor}
+\IF{( \textit{T \textsubscript{body}} $>$= \textit{T\textsubscript{th}} )}
+	\STATE {Turn LED ON}
+	\STATE {Buzzer sound}
+	\STATE {Send alarm message to the parent app}
+	\STATE {Add event to the database}
+\ENDIF
+\end{algorithmic}
+\end{algorithm}
+=============================
+\begin{algorithm}
+\caption{Fall detection}\label{alg:cap2}
+\begin{algorithmic}
+\REQUIRE {3 Axis Analog Gyro and Accelerometer }
+\ENSURE {hard falling warning}
+\STATE {\textit{Initialization:}} 
+\STATE {Set threshold for detecting falling between 0 and 10 \textit{F \textsubscript{th}} }
+\STATE {Get acceleration and gyroscope values from the sensor and apply the formula to detect hard-falling \textit{F}}
+\IF{( \textit{T \textsubscript{thmin}} $<$ \textit{F} $<$ \textit{T\textsubscript{thmax}})}
+	\STATE {Turn LED ON}
+	\STATE {Buzzer sound}
+	\STATE {Send alarm message to the parent app}
+	\STATE {Add event to the database}
+\ENDIF
+\end{algorithmic}
+\end{algorithm}
+=============================
+Algorithm 3 GPS location detection
+Require: GPS Module
+Ensure: Exit area detection
+	Initialization:
+	Set threshold for detecting distance from parent Dth= 20m
+	Get location latitude and longitude values every minute D
+	if(D > Dth)
+		Turn LED ON
+		Buzzer sound
+		Send alarm message to the parent app
+		Add event to the database
+	End if
+%-------------------------------------------
+\begin{algorithm}
+\caption{GPS location detection}\label{alg:cap2}
+\begin{algorithmic}
+\REQUIRE {GPS Module}
+\ENSURE {Exit area detection}
+\STATE {\textit{Initialization:}} 
+\STATE {Set threshold for detecting distance from parent \textit{D \textsubscript{th} = 20m } }
+\STATE {Get location latitude and longitude values every minute \textit{D}}
+\IF{( \textit{D}  $>$ textit{D \textsubscript{th})}
+	\STATE {Turn LED ON}
+	\STATE {Buzzer sound}
+	\STATE {Send alarm message to the parent app}
+	\STATE {Add event to the database}
+\ENDIF
+\end{algorithmic}
+\end{algorithm}
